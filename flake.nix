@@ -1,14 +1,12 @@
 {
-  description = "My Rust Flake Template";
+  description = "Templates for Nix Flakes";
 
   outputs = { self }: {
     templates = {
-      app = {
-        path = ./app;
+      rust-naersk = {
+        path = ./rust-naersk;
         description = "Flake for a Rust App using Naersk";
       };
     };
-
-    defaultTemplate = self.templates.app;
   };
 }

@@ -1,7 +1,9 @@
-# template-rs-nix
+# nix-templates
 
-Template for Rust on NixOS.
+Templates for Nix Projects.
 
-TODO:
+## TODO:
 
 - [ ] Add treefmt to template for formatting.
+- [ ] Use nix flake method to build on github actions
+- [ ] Use github actions to run tests
