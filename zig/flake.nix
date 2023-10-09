@@ -1,17 +1,28 @@
 {
   inputs = {
-    flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
     devenv.url = "github:cachix/devenv";
+    flake-parts = {
+      url = "github:hercules-ci/flake-parts";
+      inputs.nixpkgs-lib.follows = "nixpkgs";
+    };
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     zig-overlay.url = "github:mitchellh/zig-overlay";
     zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
     zls-main.url = "github:zigtools/zls";
     zls-main.inputs.nixpkgs.follows = "nixpkgs";
-    zls-main.inputs.flake-utils.follows = "flake-utils";
     zls-main.inputs.zig-overlay.follows = "zig-overlay";
+
+    flake-compat = {
+      url = "github:edolstra/flake-compat";
+      flake = false;
+    };
   };
 
   nixConfig = {
@@ -20,91 +31,76 @@
   };
 
   outputs = {
-    flake-utils,
     nixpkgs,
     zig-overlay,
     zls-main,
     devenv,
+    flake-parts,
+    treefmt-nix,
     ...
-  }:
-    flake-utils.lib.eachDefaultSystem (system: let
-        overlays = [
-          (final: prev: {
-            zigpkgs = zig-overlay.packages.${final.system};
-            zls = zls-main.packages.${final.system}.zls;
-          })
-        ];
-        pkgs = import nixpkgs {inherit system overlays;};
+  } @ inputs:
+    flake-parts.lib.mkFlake {inherit inputs;} {
+      imports = [
+        devenv.flakeModule
+        treefmt-nix.flakeModule
+      ];
 
-        # TODO: grab this from something, rather than hard coding it, perhaps current folder name?
-        pname = "cool-zig-package";
-        version = "0.1.0";
-      in rec
-      {
-        packages = {
-          default = pkgs.stdenv.mkDerivation {
-            inherit pname version;
+      systems = nixpkgs.lib.systems.flakeExposed;
 
-            src = ./.;
-
-            nativeBuildInputs = with pkgs; [
-              zigpkgs.master
-            ];
-
-            ZIG_BUILD_FLAGS = "-p . --cache-dir . --global-cache-dir . -Dtarget=${system}";
-
-            buildPhase = ''
-              zig build $ZIG_BUILD_FLAGS
-            '';
-
-            doCheck = true;
-            checkPhase = ''
-              zig build test $ZIG_BUILD_FLAGS
-            '';
-
-            installPhase = ''
-              mkdir -p $out/bin
-              mv bin/* $out/bin
-            '';
-          };
-        };
-
-        devShells.default = devenv.lib.mkShell {
-          inherit inputs pkgs;
-          modules = [
-            ({pkgs, ...}: {
-              packages = with pkgs; [
-                alejandra
-                zls
-                lldb
-                commitizen
-              ];
-
-              languages.nix.enable = true;
-              languages.zig.enable = true;
-              languages.zig.package = pkgs.zigpkgs.master;
-
-              pre-commit.hooks.alejandra.enable = true;
-              pre-commit.hooks.commitizen.enable = true;
-              pre-commit.hooks.convco.enable = true;
-              pre-commit.hooks."zigtest" = {
-                enable = true;
-                name = "zig test";
-                description = "Runs zig build test on the project.";
-                entry = "${pkgs.zigpkgs.master}/bin/zig build test --build-file ./build.zig";
-                pass_filenames = false;
-              };
-
-              difftastic.enable = true;
-
-              scripts.run-tests.exec = ''
-                ${pkgs.zigpkgs.master}/bin/zig build test --summary all
-              '';
+      perSystem = {
+        config,
+        pkgs,
+        system,
+        ...
+      }: {
+        _module.args.pkgs = import inputs.nixpkgs {
+          inherit system;
+          overlays = [
+            (final: prev: {
+              zig = zig-overlay.packages.${system}.master;
+              zls = zls-main.packages.${system}.zls;
             })
           ];
         };
 
-        # For compatibility with older versions of the `nix` binary
-        devShell = devShells.${system}.default;
-      });
+        devenv.shells.default = {
+          packages = with pkgs; [
+            zls
+            lldb
+            commitizen
+            config.treefmt.build.wrapper
+          ];
+
+          languages.nix.enable = true;
+          languages.zig.enable = true;
+          languages.zig.package = pkgs.zig;
+
+          pre-commit.hooks.alejandra.enable = true;
+          pre-commit.hooks.commitizen.enable = true;
+          pre-commit.hooks.convco.enable = true;
+          pre-commit.hooks."zigtest" = {
+            enable = true;
+            name = "zig test";
+            description = "Runs zig build test on the project.";
+            entry = "${pkgs.zig}/bin/zig build test --build-file ./build.zig";
+            pass_filenames = false;
+          };
+
+          difftastic.enable = true;
+        };
+
+        treefmt = {
+          projectRootFile = "flake.nix";
+          programs = {
+            alejandra.enable = true;
+            deadnix.enable = true;
+          };
+          settings.formatter.zigfmt = {
+            command = "${pkgs.zig}/bin/zig";
+            includes = ["*.zig"];
+            options = ["fmt"];
+          };
+        };
+      };
+    };
 }
